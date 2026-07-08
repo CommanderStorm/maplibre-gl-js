@@ -40,3 +40,22 @@ export function loadGeometry(feature: VectorTileFeatureLike): Point[][] {
     }
     return geometry;
 }
+
+/**
+ * Scales a pre-tessellated feature's interleaved x,y `vertices` from tile-extent
+ * units to the common internal extent, applying the exact same rounding and
+ * clamping as {@link loadGeometry}. This guarantees a tessellation vertex that
+ * shares a tile coordinate with a geometry vertex maps to the same internal
+ * integer coordinate, so triangles and outlines stay stitched together.
+ * @param vertices - interleaved x,y coordinates in tile-extent units
+ * @param extent - the feature's tile extent
+ */
+export function scaleTessellationVertices(vertices: ArrayLike<number>, extent: number): Int32Array {
+    const scale = EXTENT / extent;
+    // Rounded + clamped to the signed-15-bit range, so the values fit an Int32Array.
+    const scaled = new Int32Array(vertices.length);
+    for (let i = 0; i < vertices.length; i++) {
+        scaled[i] = clamp(Math.round(vertices[i] * scale), MIN, MAX);
+    }
+    return scaled;
+}

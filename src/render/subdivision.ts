@@ -8,7 +8,7 @@ import {register} from '../util/web_worker_transfer.ts';
 register('SubdivisionGranularityExpression', SubdivisionGranularityExpression);
 register('SubdivisionGranularitySetting', SubdivisionGranularitySetting);
 
-type SubdivisionResult = {
+export type SubdivisionResult = {
     verticesFlattened: number[];
     indicesTriangles: number[];
 
@@ -566,7 +566,7 @@ class Subdivider {
     /**
      * Adds all vertices in the supplied flattened vertex buffer into the internal vertex buffer.
      */
-    private _initializeVertices(flattened: number[]) {
+    private _initializeVertices(flattened: ArrayLike<number>) {
         for (let i = 0; i < flattened.length; i += 2) {
             this._vertexToIndex(flattened[i], flattened[i + 1]);
         }
@@ -580,21 +580,37 @@ class Subdivider {
      * @returns Vertex and index buffers with subdivision applied.
      */
     public subdividePolygonInternal(polygon: Point[][], generateOutlineLines: boolean): SubdivisionResult {
+        const {flattened, holeIndices} = flatten(polygon);
+        return this._subdivideMesh(flattened, () => earcut(flattened, holeIndices), polygon, generateOutlineLines);
+    }
+
+    /**
+     * Shared core of {@link subdividePolygonInternal} and {@link subdivideTessellatedInternal}:
+     * seeds the vertex dictionary, subdivides the triangle mesh to the current granularity,
+     * generates the outline, and adds pole geometry.
+     * @param vertices - Flattened (x, y) mesh vertices.
+     * @param computeTriangleIndices - Produces the triangle indices into `vertices` (earcut or supplied). Invoked inside the try/catch so triangulation failures are handled.
+     * @param outline - Polygon rings used to generate outline lines.
+     * @param generateOutlineLines - When true, also generates line indices for the outline.
+     */
+    private _subdivideMesh(
+        vertices: ArrayLike<number>,
+        computeTriangleIndices: () => ArrayLike<number>,
+        outline: Point[][],
+        generateOutlineLines: boolean,
+    ): SubdivisionResult {
         if (this._used) {
             throw new Error('Subdivision: multiple use not allowed.');
         }
         this._used = true;
 
         // Initialize the vertex dictionary with input vertices since we will use all of them anyway
-        const {flattened, holeIndices} = flatten(polygon);
-        this._initializeVertices(flattened);
+        this._initializeVertices(vertices);
 
         // Subdivide triangles
         let subdividedTriangles: number[];
         try {
-            // At this point this._finalVertices is just flattened polygon points
-            const earcutResult = earcut(flattened, holeIndices);
-            const cut = this._convertIndices(flattened, earcutResult);
+            const cut = this._convertIndices(vertices, computeTriangleIndices());
             subdividedTriangles = this._subdivideTrianglesScanline(cut);
         } catch (e) {
             console.error(e);
@@ -603,7 +619,7 @@ class Subdivider {
         // Subdivide lines
         let subdividedLines: number[][] = [];
         if (generateOutlineLines) {
-            subdividedLines = this._generateOutline(polygon);
+            subdividedLines = this._generateOutline(outline);
         }
 
         // Ensure no vertex has the special value used for pole vertices
@@ -620,6 +636,25 @@ class Subdivider {
     }
 
     /**
+     * Like {@link subdividePolygonInternal}, but consumes a pre-tessellated triangle mesh
+     * (as shipped by MLT tiles) instead of triangulating the polygon with earcut. The
+     * supplied triangle `indices` are fed straight into the scanline subdivider, so all
+     * projection-specific subdivision and pole handling still apply.
+     * @param vertices - Flattened (x, y) mesh vertices, already scaled to the internal extent.
+     * @param indices - Triangle indices into `vertices` (three per triangle).
+     * @param outline - Polygon rings used to generate outline lines. Pass an empty array to skip.
+     * @param generateOutlineLines - When true, also generates line indices for the outline.
+     */
+    public subdivideTessellatedInternal(
+        vertices: ArrayLike<number>,
+        indices: ArrayLike<number>,
+        outline: Point[][],
+        generateOutlineLines: boolean,
+    ): SubdivisionResult {
+        return this._subdivideMesh(vertices, () => indices, outline, generateOutlineLines);
+    }
+
+    /**
      * Sometimes the supplies vertex and index array has duplicate vertices - same coordinates that are referenced by multiple different indices.
      * That is not allowed for purposes of subdivision, duplicates are removed in `this.initializeVertices`.
      * This function converts the original index array that indexes into the original vertex array with duplicates
@@ -628,9 +663,12 @@ class Subdivider {
      * @param oldIndices - Indices into the old vertex array.
      * @returns Indices transformed so that they are valid indices into `this._finalVertices` (with duplicates removed).
      */
-    private _convertIndices(vertices: number[], oldIndices: number[]): number[] {
+    private _convertIndices(vertices: ArrayLike<number>, oldIndices: ArrayLike<number>): number[] {
         const newIndices = [];
-        for (const oldIndex of oldIndices) {
+        // Indexed loop rather than for-of: oldIndices may be a bare ArrayLike (not iterable).
+        // eslint-disable-next-line @typescript-eslint/prefer-for-of
+        for (let i = 0; i < oldIndices.length; i++) {
+            const oldIndex = oldIndices[i];
             const x = vertices[oldIndex * 2];
             const y = vertices[oldIndex * 2 + 1];
             newIndices.push(this._vertexToIndex(x, y));
@@ -664,6 +702,31 @@ class Subdivider {
 export function subdividePolygon(polygon: Point[][], canonical: CanonicalTileID, granularity: number, generateOutlineLines: boolean = true): SubdivisionResult {
     const subdivider = new Subdivider(granularity, canonical);
     return subdivider.subdividePolygonInternal(polygon, generateOutlineLines);
+}
+
+/**
+ * Subdivides a polygon that already carries a pre-tessellated triangle mesh (e.g. from an MLT tile),
+ * reusing that mesh instead of running earcut. Behaves like {@link subdividePolygon} otherwise:
+ * the triangles are subdivided to the requested granularity, outline lines are generated from the
+ * supplied rings, and pole geometry is added for tiles bordering the poles.
+ * @param vertices - Flattened (x, y) mesh vertices, already scaled to the internal extent.
+ * @param indices - Triangle indices into `vertices` (three per triangle).
+ * @param outline - Polygon rings (exterior + holes) used to generate outline lines.
+ * @param canonical - The canonical tile ID of the tile this polygon belongs to.
+ * @param granularity - The subdivision granularity. Granularity of 1 or lower results in *no* subdivision.
+ * @param generateOutlineLines - When true, also generates index arrays for the polygon outline. True by default.
+ * @returns An object that contains the generated vertex array, triangle index array and, if specified, line index arrays.
+ */
+export function subdivideTessellatedPolygon(
+    vertices: ArrayLike<number>,
+    indices: ArrayLike<number>,
+    outline: Point[][],
+    canonical: CanonicalTileID,
+    granularity: number,
+    generateOutlineLines: boolean = true,
+): SubdivisionResult {
+    const subdivider = new Subdivider(granularity, canonical);
+    return subdivider.subdivideTessellatedInternal(vertices, indices, outline, generateOutlineLines);
 }
 
 /**

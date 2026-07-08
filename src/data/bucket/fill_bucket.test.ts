@@ -103,6 +103,36 @@ describe('FillBucket', () => {
 
     });
 
+    test('FillBucket uses a pre-tessellated mesh when the feature provides one', () => {
+        // A unit square tessellated into two triangles.
+        const tessellation = {
+            vertices: [0, 0, 4096, 0, 4096, 4096, 0, 4096],
+            indices: [0, 1, 2, 0, 2, 3]
+        };
+        const outline: Point[][] = [[
+            new Point(0, 0),
+            new Point(4096, 0),
+            new Point(4096, 4096),
+            new Point(0, 4096),
+            new Point(0, 0)
+        ]];
+
+        const tessellatedBucket = createFillBucket({id: 'test', layout: {}});
+        tessellatedBucket.addFeature({tessellation} as unknown as BucketFeature, outline, undefined, canonicalTileID, undefined, SubdivisionGranularitySetting.noSubdivision);
+
+        expect(tessellatedBucket.layoutVertexArray).toHaveLength(4);
+        expect(tessellatedBucket.indexArray).toHaveLength(2);
+        expect(tessellatedBucket.indexArray2).toHaveLength(4);
+        expect(tessellatedBucket.segments.get()[0].primitiveLength).toBe(2);
+
+        // The earcut fallback for the same square must produce an equivalent mesh.
+        const earcutBucket = createFillBucket({id: 'test', layout: {}});
+        earcutBucket.addFeature({} as BucketFeature, outline, undefined, canonicalTileID, undefined, SubdivisionGranularitySetting.noSubdivision);
+        expect(tessellatedBucket.layoutVertexArray.length).toBe(earcutBucket.layoutVertexArray.length);
+        expect(tessellatedBucket.indexArray.length).toBe(earcutBucket.indexArray.length);
+        expect(tessellatedBucket.indexArray2.length).toBe(earcutBucket.indexArray2.length);
+    });
+
     test('FillBucket fill-pattern with global-state', () => {
         const availableImages = [];
         const bucket = createFillBucket({id: 'test', paint: {

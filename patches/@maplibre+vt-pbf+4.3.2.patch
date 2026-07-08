@@ -1,0 +1,48 @@
+diff --git a/node_modules/@maplibre/vt-pbf/dist/index.d.ts b/node_modules/@maplibre/vt-pbf/dist/index.d.ts
+index 85a3d76..15058cc 100644
+--- a/node_modules/@maplibre/vt-pbf/dist/index.d.ts
++++ b/node_modules/@maplibre/vt-pbf/dist/index.d.ts
+@@ -1,6 +1,6 @@
+ import { type Feature, GEOJSON_TILE_LAYER_NAME, type GeoJSONOptions, GeoJSONWrapper } from "./lib/geojson_wrapper";
+ import type { GeoJSONVTTile } from '@maplibre/geojson-vt';
+-import type { VectorTileFeatureLike, VectorTileLike, VectorTileLayerLike } from './lib/types';
++import type { FeatureTessellation, VectorTileFeatureLike, VectorTileLike, VectorTileLayerLike } from './lib/types';
+ /**
+  * Serialize a vector-tile-js-created tile to pbf
+  *
+@@ -17,4 +17,4 @@ export declare function fromVectorTileJs(tile: VectorTileLike, jsonPrefix?: stri
+  * @return uncompressed, pbf-serialized tile data
+  */
+ export declare function fromGeojsonVt(layers: Record<string, GeoJSONVTTile>, options?: GeoJSONOptions): Uint8Array;
+-export { GeoJSONWrapper, GeoJSONOptions, Feature, GEOJSON_TILE_LAYER_NAME, VectorTileFeatureLike, VectorTileLike, VectorTileLayerLike, };
++export { GeoJSONWrapper, GeoJSONOptions, Feature, GEOJSON_TILE_LAYER_NAME, FeatureTessellation, VectorTileFeatureLike, VectorTileLike, VectorTileLayerLike, };
+diff --git a/node_modules/@maplibre/vt-pbf/dist/lib/types.d.ts b/node_modules/@maplibre/vt-pbf/dist/lib/types.d.ts
+index 56158ca..60d1982 100644
+--- a/node_modules/@maplibre/vt-pbf/dist/lib/types.d.ts
++++ b/node_modules/@maplibre/vt-pbf/dist/lib/types.d.ts
+@@ -1,10 +1,25 @@
+ import type Point from '@mapbox/point-geometry';
++/**
++ * A feature's pre-tessellated triangle mesh in tile-extent units, as provided by
++ * decoders that ship tessellation (e.g. MLT). `vertices` is interleaved x,y;
++ * `indices` are feature-local vertex indices, three per triangle.
++ */
++export type FeatureTessellation {
++    vertices: ArrayLike<number>;
++    indices: ArrayLike<number>;
++}
+ export interface VectorTileFeatureLike {
+     type: 0 | 1 | 2 | 3;
+     properties: Record<string, number | string | boolean>;
+     id: number | undefined;
+     extent: number;
+     loadGeometry(): Point[][];
++    /**
++     * Returns this feature's pre-tessellated triangle mesh when the decoder
++     * ships tessellation (e.g. MLT), otherwise `undefined`. Decoders without
++     * tessellation simply omit this method.
++     */
++    loadTessellation?(): FeatureTessellation | undefined;
+ }
+ export interface VectorTileLayerLike {
+     version: number;

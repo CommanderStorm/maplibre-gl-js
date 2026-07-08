@@ -56,6 +56,15 @@ export type BucketFeature = {
     };
     readonly dashes?: NonNullable<StyleFeature['dashes']>;
     sortKey?: number;
+    /**
+     * Pre-tessellated triangle mesh for this feature, already scaled to the internal
+     * extent, when the source tile provides one (e.g. MLT). Fill and fill-extrusion
+     * buckets upload this directly instead of triangulating with earcut.
+     */
+    tessellation?: {
+        vertices: Int32Array;
+        indices: ArrayLike<number>;
+    };
 };
 
 /**

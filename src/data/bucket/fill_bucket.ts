@@ -8,7 +8,7 @@ import {classifyRings} from '@maplibre/maplibre-gl-style-spec';
 const EARCUT_MAX_RINGS = 500;
 import {register} from '../../util/web_worker_transfer.ts';
 import {hasPattern, addPatternDependencies} from './pattern_bucket_features.ts';
-import {loadGeometry} from '../load_geometry.ts';
+import {loadGeometry, scaleTessellationVertices} from '../load_geometry.ts';
 import {toEvaluationFeature} from '../evaluation_feature.ts';
 import {EvaluationParameters} from '../../style/evaluation_parameters.ts';
 
@@ -27,7 +27,7 @@ import type {VertexBuffer} from '../../webgl/vertex_buffer.ts';
 import type Point from '@mapbox/point-geometry';
 import type {FeatureStates} from '../../source/source_state.ts';
 import type {ImagePosition} from '../../render/image_atlas.ts';
-import {subdividePolygon} from '../../render/subdivision.ts';
+import {subdividePolygon, subdivideTessellatedPolygon, type SubdivisionResult} from '../../render/subdivision.ts';
 import type {SubdivisionGranularitySetting} from '../../render/subdivision_granularity_settings.ts';
 import {fillLargeMeshArrays} from '../../render/fill_large_mesh_arrays.ts';
 import type {VectorTileLayerLike} from '@maplibre/vt-pbf';
@@ -102,6 +102,14 @@ export class FillBucket implements Bucket {
                 sortKey
             };
 
+            const tessellation = feature.loadTessellation?.();
+            if (tessellation) {
+                bucketFeature.tessellation = {
+                    vertices: scaleTessellationVertices(tessellation.vertices, feature.extent),
+                    indices: tessellation.indices
+                };
+            }
+
             bucketFeatures.push(bucketFeature);
         }
 
@@ -173,24 +181,34 @@ export class FillBucket implements Bucket {
     addFeature(feature: BucketFeature, geometry: Point[][], index: number, canonical: CanonicalTileID, imagePositions: {
         [_: string]: ImagePosition;
     }, subdivisionGranularity: SubdivisionGranularitySetting): void {
-        for (const polygon of classifyRings(geometry, EARCUT_MAX_RINGS)) {
-            const subdivided = subdividePolygon(polygon, canonical, subdivisionGranularity.fill.getGranularityForZoomLevel(canonical.z));
+        const granularity = subdivisionGranularity.fill.getGranularityForZoomLevel(canonical.z);
+        const vertexArray = this.layoutVertexArray;
+        const emplaceMesh = (subdivided: SubdivisionResult) => fillLargeMeshArrays(
+            (x, y) => {
+                vertexArray.emplaceBack(x, y);
+            },
+            this.segments,
+            this.layoutVertexArray,
+            this.indexArray,
+            subdivided.verticesFlattened,
+            subdivided.indicesTriangles,
+            this.segments2,
+            this.indexArray2,
+            subdivided.indicesLineList,
+        );
 
-            const vertexArray = this.layoutVertexArray;
-
-            fillLargeMeshArrays(
-                (x, y) => {
-                    vertexArray.emplaceBack(x, y);
-                },
-                this.segments,
-                this.layoutVertexArray,
-                this.indexArray,
-                subdivided.verticesFlattened,
-                subdivided.indicesTriangles,
-                this.segments2,
-                this.indexArray2,
-                subdivided.indicesLineList,
-            );
+        if (feature.tessellation) {
+            emplaceMesh(subdivideTessellatedPolygon(
+                feature.tessellation.vertices,
+                feature.tessellation.indices,
+                geometry,
+                canonical,
+                granularity,
+            ));
+        } else {
+            for (const polygon of classifyRings(geometry, EARCUT_MAX_RINGS)) {
+                emplaceMesh(subdividePolygon(polygon, canonical, granularity));
+            }
         }
         this.programConfigurations.populatePaintArrays(this.layoutVertexArray.length, feature, index, {imagePositions, canonical});
     }

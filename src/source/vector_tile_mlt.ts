@@ -1,6 +1,6 @@
 import Point from '@mapbox/point-geometry';
 import {type FeatureTable, decodeTile, type Feature as MLTFeature, GEOMETRY_TYPE} from '@maplibre/mlt';
-import type {VectorTileFeatureLike, VectorTileLayerLike, VectorTileLike} from '@maplibre/vt-pbf';
+import type {FeatureTessellation, VectorTileFeatureLike, VectorTileLayerLike, VectorTileLike} from '@maplibre/vt-pbf';
 
 class MLTVectorTileFeature implements VectorTileFeatureLike {
     _featureData: MLTFeature;
@@ -42,6 +42,15 @@ class MLTVectorTileFeature implements VectorTileFeatureLike {
             points.push(pointRing);
         }
         return points;
+    }
+
+    /**
+     * Returns the pre-tessellated triangle mesh for this feature when the tile
+     * carries tessellation streams, otherwise `undefined`. Coordinates are in
+     * tile-extent units; indices are feature-local (three per triangle).
+     */
+    loadTessellation(): FeatureTessellation | undefined {
+        return this._featureData.tessellation;
     }
 }
 
