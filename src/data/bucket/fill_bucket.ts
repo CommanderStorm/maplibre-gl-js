@@ -9,7 +9,7 @@ const EARCUT_MAX_RINGS = 500;
 import {register} from '../../util/web_worker_transfer.ts';
 import {hasPattern, addPatternDependencies} from './pattern_bucket_features.ts';
 import {loadGeometry} from '../load_geometry.ts';
-import {toEvaluationFeature} from '../evaluation_feature.ts';
+import {EMPTY_EVALUATION_FEATURE, toEvaluationFeature} from '../evaluation_feature.ts';
 import {EvaluationParameters} from '../../style/evaluation_parameters.ts';
 
 import type {CanonicalTileID} from '../../tile/tile_id.ts';
@@ -82,11 +82,16 @@ export class FillBucket implements Bucket {
         const bucketFeatures: BucketFeature[] = [];
 
         const globalProperties = new EvaluationParameters(this.zoom);
-        const needGeometry = this.layers[0]._featureFilter.needGeometry;
+        const featureFilter = this.layers[0]._featureFilter;
+        const needGeometry = featureFilter.needGeometry;
+        // A feature-constant filter has the same result for every feature in the tile, so
+        // evaluate it once: bail out entirely if it rejects, otherwise skip the per-feature call.
+        if (featureFilter.isConstant && !featureFilter.filter(globalProperties, EMPTY_EVALUATION_FEATURE, canonical)) return;
+        const skipFilter = featureFilter.isConstant;
         for (const {feature, id, index, sourceLayerIndex} of features) {
             const evaluationFeature = toEvaluationFeature(feature, needGeometry);
 
-            if (!this.layers[0]._featureFilter.filter(globalProperties, evaluationFeature, canonical)) continue;
+            if (!skipFilter && !featureFilter.filter(globalProperties, evaluationFeature, canonical)) continue;
 
             const sortKey = sortFeaturesByKey ?
                 fillSortKey.evaluate(evaluationFeature, {}, canonical, options.availableImages) :

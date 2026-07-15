@@ -16,3 +16,10 @@ export function toEvaluationFeature(feature: VectorTileFeatureLike, needGeometry
         properties: feature.properties,
         geometry: needGeometry ? loadGeometry(feature) : []};
 }
+
+/**
+ * Stub feature for evaluating a feature-constant filter (`FeatureFilter.isConstant`)
+ * a single time per tile. Such a filter never reads the feature, so these fields are
+ * never inspected — they exist only to satisfy the evaluation signature.
+ */
+export const EMPTY_EVALUATION_FEATURE: EvaluationFeature = {type: 1, properties: {}, geometry: []};
